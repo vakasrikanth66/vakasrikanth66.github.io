@@ -1,0 +1,11 @@
+* {
+  font-family: 'Inter', sans-serif;
+}
+body {
+  background-color: #fff;
+  color: #333;
+}
+.card img {
+  object-fit: cover;
+  height: 200px;
+}
