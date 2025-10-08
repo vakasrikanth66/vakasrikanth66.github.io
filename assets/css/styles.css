@@ -1,3 +1,19 @@
+/* Responsive carousel container style moved from inline in services.html */
+@media (min-width: 801px) {
+  .custom-carousel {
+    width: 100%;
+    border: 3px solid #00A99E;
+    box-shadow: 10px 6px 24px rgba(92, 81, 81, 0.13);
+  }
+}
+@media (max-width: 800px) {
+  .custom-carousel {
+    width: 100%;
+    border: 3px solid #00A99E;
+    box-shadow: 10px 6px 24px rgba(92, 81, 81, 0.13);
+
+  }
+}
 * {
   font-family: 'Inter', sans-serif;
 }
