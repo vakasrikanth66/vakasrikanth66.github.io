@@ -470,4 +470,224 @@
 </footer>
 
 </body>
-</html>
+    <!-- Your existing content -->
+
+    <!-- Chatbot UI -->
+    <!-- Floating AI Button -->
+    <div id="ai-fab" tabindex="0" aria-label="Open AI Chatbot">
+      <span>AI</span>
+    </div>
+
+    <!-- Chatbot Window (hidden by default) -->
+    <div id="chatbot-container" style="display:none;">
+      <div class="chatbot-header">
+        <span>🤖 PSMN Assistant</span>
+        <button id="chatbot-close" aria-label="Close chat">&times;</button>
+      </div>
+      <div id="chatbot-messages" class="chatbot-messages"></div>
+      <form id="chatbot-form" class="chatbot-form" autocomplete="off">
+        <input id="chatbot-input" type="text" placeholder="Type your message..." autocomplete="off" />
+        <button type="submit" aria-label="Send">&#x27A4;</button>
+      </form>
+    </div>
+
+  <link rel="stylesheet" href="assets/css/styles.css">
+
+    <script>
+    // --- LLM Chatbot with Groq API Integration ---
+    const fab = document.getElementById('ai-fab');
+    const container = document.getElementById('chatbot-container');
+    const closeBtn = document.getElementById('chatbot-close');
+    const form = document.getElementById('chatbot-form');
+    const input = document.getElementById('chatbot-input');
+    const messages = document.getElementById('chatbot-messages');
+
+    let PROJECT_CONTEXT = '';
+    let conversationHistory = [];
+    const MAX_HISTORY_LENGTH = 4; // Keep last 4 exchanges to save tokens
+
+    // Load context from project_context.txt
+    fetch('project_context.txt')
+      .then(r => r.text())
+      .then(txt => { PROJECT_CONTEXT = txt; });
+
+    function addMessage(text, from) {
+      const div = document.createElement('div');
+      div.className = 'chatbot-bubble ' + from;
+      div.innerHTML = text.replace(/\n/g, '<br>');
+      messages.appendChild(div);
+      messages.scrollTop = messages.scrollHeight;
+    }
+
+    function showChatbot() {
+      fab.style.display = 'none';
+      container.style.display = 'flex';
+      setTimeout(() => { input.focus(); }, 350);
+    }
+    function hideChatbot() {
+      container.style.display = 'none';
+      fab.style.display = 'flex';
+      fab.focus();
+    }
+
+    fab.onclick = showChatbot;
+    fab.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') showChatbot(); };
+    closeBtn.onclick = hideChatbot;
+
+    // Initial welcome message (only once per open)
+    let greeted = false;
+    function greet() {
+      messages.innerHTML = '';
+      conversationHistory = []; // Reset history when chat opens
+      addMessage("Hi! 👋 I'm your PSMN Assistant. Ask me anything about our services, team, or expertise!", 'bot');
+      greeted = true;
+    }
+    // Show greeting when opened
+    const observer = new MutationObserver(() => {
+      if (container.style.display !== 'none' && !greeted) greet();
+      if (container.style.display === 'none') greeted = false;
+    });
+    observer.observe(container, { attributes: true, attributeFilter: ['style'] });
+
+    // Build prompt with context and limited conversation history
+    function buildPrompt(question) {
+      let historyText = '';
+      if (conversationHistory.length > 0) {
+        historyText = 'Previous conversation:\n';
+        conversationHistory.forEach(msg => {
+          historyText += `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}\n`;
+        });
+        historyText += '\n';
+      }
+      
+      return `<s>[INST] You are an expert, friendly assistant for PSMN Metallurgical & NDT Services. Use ONLY the following context to answer user questions. If you don't know the answer, politely say so and offer to help with something else. Keep answers clear and concise.
+
+CONTEXT:
+${PROJECT_CONTEXT}
+
+${historyText}User question: ${question} [/INST]`;
+    }
+
+    // --- LLM Integration using HuggingFace API (Free) ---
+  async function askLLM(question) {
+      addMessage('<span style="color:#888;">⏳ Thinking...</span>', 'bot');
+      const prompt = buildPrompt(question);
+      
+      try {
+        // Using HuggingFace Inference API - get your free API token from https://huggingface.co/settings/tokens
+        const response = await fetch('https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            // Note: Uncomment and add your HF token below for better responses!
+            // 'Authorization': 'Bearer YOUR_HUGGINGFACE_TOKEN_HERE',
+          },
+          body: JSON.stringify({
+            inputs: prompt,
+            parameters: {
+              max_new_tokens: 512,
+              temperature: 0.7,
+              top_p: 0.95,
+              return_full_text: false
+            }
+          })
+        });
+        
+        const data = await response.json();
+        // Remove "Thinking..." bubble
+        if (messages.lastChild) messages.removeChild(messages.lastChild);
+        
+        let answer = '';
+        if (data && data[0] && data[0].generated_text) {
+          answer = data[0].generated_text.trim();
+          // Clean up response
+          answer = answer.replace(/^<s>|<\/s>$/g, '').trim();
+          answer = answer.replace(/\[INST\].*?\[\/INST\]/gs, '').trim();
+        }
+        
+        if (!answer) {
+          console.warn('HF response missing generated_text:', data);
+          // fallback to local FAQ
+          answer = localFAQAnswer(question);
+        }
+        
+        addMessage(answer, 'bot');
+        
+        // Update conversation history
+        conversationHistory.push({ role: 'user', content: question });
+        conversationHistory.push({ role: 'assistant', content: answer });
+        
+        // Keep history limited to save tokens
+        if (conversationHistory.length > MAX_HISTORY_LENGTH * 2) {
+          conversationHistory = conversationHistory.slice(-MAX_HISTORY_LENGTH * 2);
+        }
+        
+      } catch (err) {
+        if (messages.lastChild) messages.removeChild(messages.lastChild);
+        console.error('LLM Error:', err);
+        const fallback = localFAQAnswer(question);
+        addMessage(fallback, 'bot');
+        
+        // Still add to history even if using fallback
+        conversationHistory.push({ role: 'user', content: question });
+        conversationHistory.push({ role: 'assistant', content: fallback });
+        
+        if (conversationHistory.length > MAX_HISTORY_LENGTH * 2) {
+          conversationHistory = conversationHistory.slice(-MAX_HISTORY_LENGTH * 2);
+        }
+      }
+    }
+
+    // Enhanced local FAQ fallback with better responses
+    function localFAQAnswer(q) {
+      const question = q.toLowerCase().trim();
+      
+      if (/what is ndt|explain ndt|tell me about ndt|ndt\?/.test(question)) {
+        return `NDT stands for Non-Destructive Testing — a set of techniques used to evaluate materials, components, or assemblies without causing damage. At PSMN, our NDT services include:\n\n• Ultrasonic Flaw Detection\n• Ultrasonic Thickness Gauging\n• Magnetic Particle Testing\n• Dye Penetrant Testing\n• Radiography Testing\n\nThese methods help ensure the integrity and safety of your materials!`;
+      }
+      
+      if (/what is metallurgy|metallurgy|metallurgical/.test(question)) {
+        return `Metallurgy is the science and technology of metals, including their extraction, purification, alloying, and heat treatment. At PSMN, our metallurgy services include:\n\n• Microstructure Analysis\n• Macrostructure Analysis\n• Inclusion Rating\n• Grain Size Measurement\n\nThese services help evaluate material quality and properties!`;
+      }
+      
+      if (/what is destructive testing|destructive testing|destructive/.test(question)) {
+        return `Destructive Testing involves testing materials to failure to evaluate their mechanical properties. At PSMN, our Destructive Testing services include:\n\n• Mechanical Testing (Yield, Tensile, Elongation)\n• Hardness Testing\n• Izod & Charpy Impact Tests\n• Failure Analysis\n• Chemical Testing (SPECTRO MAX)\n\nThese tests provide detailed material property data!`;
+      }
+      
+      if (/service|services|what do you offer|what can you do|what services/.test(question)) {
+        return `At PSMN Metallurgical & NDT Services, we offer a comprehensive range of services:\n\n🔍 **Non-Destructive Testing (NDT):** UT, MPT, PT, RT\n⚙️ **Destructive Testing:** Mechanical, hardness, impact tests\n🔬 **Metallography & Analysis:** Microstructure, inclusion rating, grain size\n📜 **Certification & Training:** ASNT Level II, WPS & PQR\n👨‍💼 **Consulting & Third-Party Inspection**\n\nHow can I help you today?`;
+      }
+      
+      if (/contact|phone|email|reach|where are you|address/.test(question)) {
+        return `You can reach us at:\n\n📧 Email: psmn66@gmail.com\n📞 Phone: 8309258497 / 9246245379\n📍 Address: S. No. 5-7-9/6A, Sangeeth Nagar, Kukatpally, Hyderabad\n\nVisit our Contact page for more details!`;
+      }
+      
+      if (/ndt|non[- ]?destructive/.test(question)) {
+        return `Our NDT (Non-Destructive Testing) services include:\n\n• Ultrasonic Flaw Detection\n• Ultrasonic Thickness Gauging\n• Magnetic Particle Testing\n• Dye Penetrant Testing\n• Radiography Testing\n\nWould you like more information about any specific NDT method?`;
+      }
+      
+      if (/metallograph|metallo|microstructure|grain size/.test(question)) {
+        return `Our metallography services include:\n\n• Microstructure Analysis\n• Macrostructure Analysis\n• Inclusion Rating\n• Grain Size Measurement\n\nThese analyses help evaluate material properties and quality!`;
+      }
+      
+      if (/training|certification|asnt|wps|pqr/.test(question)) {
+        return `We offer comprehensive training and certification programs:\n\n• ASNT Level II Training Classes\n• WPS (Welding Procedure Specification) & PQR (Procedure Qualification Record) Certification Support\n• Third-Party Inspection Services\n\nLet us know if you need specific training!`;
+      }
+      
+      if (/mechanical|hardness|impact|tensile|yield|elongation/.test(question)) {
+        return `Our Destructive Testing services include:\n\n• Mechanical Testing (Yield, Tensile, Elongation)\n• Hardness Testing\n• Izod & Charpy Impact Tests\n• Failure Analysis\n• Chemical Testing (SPECTRO MAX)\n\nThese tests provide detailed material property data!`;
+      }
+      
+      // default
+      return `Hi! I'm your PSMN Assistant. I can help you with:\n\n• Our services (NDT, Destructive Testing, Metallography)\n• Contact information\n• Training & certification\n\nWhat would you like to know?`;
+    }
+
+    form.onsubmit = function(e) {
+      e.preventDefault();
+      const question = input.value.trim();
+      if (!question) return;
+      addMessage(question, 'user');
+      askLLM(question);
+      input.value = '';
+    };
+    </script>
